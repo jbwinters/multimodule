@@ -1,7 +1,9 @@
+from collections import namedtuple
 import os.path
 import pkgutil
 import sys
 
+PackageLoader = namedtuple('PackageLoader', ['fqname', 'loader', 'module'])
 
 class InvalidModuleError(Exception):
     def __init__(self, label, name):
@@ -19,20 +21,26 @@ def dirname(f):
 
 
 class MultiModule(object):
-    def __init__(self, label, dirname):
-        self.label = label
+    def __init__(self, loglabel, dirname):
+        self.label = loglabel
         self.dirname = dirname
+        self.loaders = {}
         self.modules = {}
 
     def load(self, renamer=None):
         for importer, package_name, _ in pkgutil.iter_modules([self.dirname]):
-            full_package_name = '{}.{}'.format(self.dirname, package_name)
+            full_package_name = '%s.%s' % (self.dirname, package_name)
+            newname = renamer(package_name) if renamer else package_name
             if full_package_name not in sys.modules:
-                module = importer.find_module(package_name).load_module(full_package_name)
-                r_pkg_name = renamer(package_name)
-                self.modules[r_pkg_name] = module
+                self.loaders[newname] = PackageLoader(full_package_name, importer.find_module(package_name), None)
+            else:
+                self.modules[newname] = sys.modules[full_package_name]
 
     def get(self, name):
-        if name not in self.modules:
+        if name not in self.loaders:
             raise InvalidModuleError(self.label, name)
+        if name not in self.modules:
+            l = self.loaders.get(name)
+            self.modules[name] = l.loader.load_module(l.fqname)
         return self.modules[name]
+
